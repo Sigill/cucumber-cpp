@@ -13,6 +13,22 @@ using namespace testing;
 
 using boost::assign::list_of;
 
+namespace cucumber {
+namespace internal {
+
+void PrintTo(const Embedding& embedding, std::ostream* os) {
+  *os << "{src: \"" << embedding.src << "\"; mime_type: \"" << embedding.mime << "\"; label: \"" << embedding.label << "\"}";
+}
+
+bool operator==(const Embedding& lhs, const Embedding& rhs) {
+  return lhs.src == rhs.src
+      && lhs.mime == rhs.mime
+      && lhs.label == rhs.label;
+}
+
+} // namespace internal
+} // namespace cucumber
+
 class MockCukeEngine : public CukeEngine {
 public:
     MOCK_CONST_METHOD1(stepMatches, std::vector<StepMatch>(const std::string & name));
@@ -191,9 +207,29 @@ TEST_F(WireMessageCodecTest, handlesSnippetTextMessage) {
  * Response encoding
  */
 
-TEST_F(WireMessageCodecTest, handlesSuccessResponse) {
+TEST_F(WireMessageCodecTest, handlesSimpleSuccessResponse) {
     SuccessResponse response;
     EXPECT_THAT(codec.encode(response), StrEq("[\"success\"]"));
+}
+
+TEST_F(WireMessageCodecTest, handlesDetailedSuccessResponse) {
+    Embedding embedding1("Some text",
+                         "text/plain",
+                         "Embedded text");
+    Embedding embedding2("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+                         "image/png;base64",
+                         "Embedded image");
+    std::vector<Embedding> embeddings = list_of(embedding1)(embedding2);
+
+    SuccessResponse response(embeddings);
+    EXPECT_THAT(codec.encode(response), StrEq(
+            "[\"success\",{"
+                "\"embeddings\":["
+                    "{\"label\":\"Embedded text\",\"mime_type\":\"text/plain\",\"src\":\"Some text\"}"
+                    ","
+                    "{\"label\":\"Embedded image\",\"mime_type\":\"image/png;base64\",\"src\":\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==\"}"
+                "]"
+            "}]"));
 }
 
 TEST_F(WireMessageCodecTest, handlesSimpleFailureResponse) {
@@ -202,9 +238,22 @@ TEST_F(WireMessageCodecTest, handlesSimpleFailureResponse) {
 }
 
 TEST_F(WireMessageCodecTest, handlesDetailedFailureResponse) {
-    FailureResponse response("My message","ExceptionClassName");
+    Embedding embedding1("Some text",
+                         "text/plain",
+                         "Embedded text");
+    Embedding embedding2("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+                         "image/png;base64",
+                         "Embedded image");
+    std::vector<Embedding> embeddings = list_of(embedding1)(embedding2);
+
+    FailureResponse response("My message", "ExceptionClassName", embeddings);
     EXPECT_THAT(codec.encode(response), StrEq(
             "[\"fail\",{"
+                "\"embeddings\":["
+                  "{\"label\":\"Embedded text\",\"mime_type\":\"text/plain\",\"src\":\"Some text\"}"
+                  ","
+                  "{\"label\":\"Embedded image\",\"mime_type\":\"image/png;base64\",\"src\":\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==\"}"
+                "],"
                 "\"exception\":\"ExceptionClassName\","
                 "\"message\":\"My message\""
             "}]"));
@@ -269,6 +318,27 @@ TEST(WireCommandsTest, succesfulInvokeReturnsSuccess) {
 
     boost::shared_ptr<const WireResponse> response(invokeCommand.run(engine));
     EXPECT_PTRTYPE(SuccessResponse, response.get());
+    EXPECT_THAT(static_cast<const SuccessResponse&>(*response).getEmbeddings(), IsEmpty());
+}
+
+TEST(WireCommandsTest, succesfulInvokeWithEmbeddingsReturnsSuccess) {
+    Embedding embedding1("Some text",
+                         "text/plain",
+                         "Embedded text");
+    Embedding embedding2("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+                         "image/png;base64",
+                         "Embedded image");
+    std::vector<Embedding> embeddings = list_of(embedding1)(embedding2);
+
+    MockCukeEngine engine;
+    InvokeCommand invokeCommand("x", CukeEngine::invoke_args_type(), CukeEngine::invoke_table_type());
+    EXPECT_CALL(engine, invokeStep(_, _, _))
+            .Times(1)
+            .WillOnce(Return(InvokeResult::success(embeddings)));
+
+    boost::shared_ptr<const WireResponse> response(invokeCommand.run(engine));
+    EXPECT_PTRTYPE(SuccessResponse, response.get());
+    EXPECT_THAT(static_cast<const SuccessResponse&>(*response).getEmbeddings(), ElementsAre(embedding1, embedding2));
 }
 
 TEST(WireCommandsTest, failingInvokeReturnsFailure) {
@@ -281,6 +351,30 @@ TEST(WireCommandsTest, failingInvokeReturnsFailure) {
     boost::shared_ptr<const WireResponse> response(invokeCommand.run(engine));
     EXPECT_PTRTYPE(FailureResponse, response.get());
     EXPECT_EQ(static_cast<const FailureResponse&>(*response).getMessage(), "A");
+    EXPECT_EQ(static_cast<const FailureResponse&>(*response).getExceptionType(), "");
+    EXPECT_THAT(static_cast<const FailureResponse&>(*response).getEmbeddings(), IsEmpty());
+}
+
+TEST(WireCommandsTest, failingInvokeWithEmbeddingsReturnsFailure) {
+    Embedding embedding1("Some text",
+                         "text/plain",
+                         "Embedded text");
+    Embedding embedding2("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+                         "image/png;base64",
+                         "Embedded image");
+    std::vector<Embedding> embeddings = list_of(embedding1)(embedding2);
+
+    MockCukeEngine engine;
+    InvokeCommand invokeCommand("x", CukeEngine::invoke_args_type(), CukeEngine::invoke_table_type());
+    EXPECT_CALL(engine, invokeStep(_, _, _))
+            .Times(1)
+            .WillOnce(Return(InvokeResult::failure("A", embeddings)));
+
+    boost::shared_ptr<const WireResponse> response(invokeCommand.run(engine));
+    EXPECT_PTRTYPE(FailureResponse, response.get());
+    EXPECT_EQ(static_cast<const FailureResponse&>(*response).getMessage(), "A");
+    EXPECT_EQ(static_cast<const FailureResponse&>(*response).getExceptionType(), "");
+    EXPECT_THAT(static_cast<const FailureResponse&>(*response).getEmbeddings(), ElementsAre(embedding1, embedding2));
 }
 
 TEST(WireCommandsTest, pendingStepReturnsPending) {
@@ -306,6 +400,7 @@ TEST(WireCommandsTest, throwingInvokeExceptionReturnsFailure) {
     EXPECT_PTRTYPE(FailureResponse, response.get());
     EXPECT_EQ (static_cast<const FailureResponse&>(*response).getMessage(), "ex");
     EXPECT_EQ (static_cast<const FailureResponse&>(*response).getExceptionType(), "InvokeException");
+    EXPECT_THAT(static_cast<const FailureResponse&>(*response).getEmbeddings(), IsEmpty());
 }
 
 TEST(WireCommandsTest, throwingAnythingInvokeReturnsFailure) {
@@ -318,6 +413,8 @@ TEST(WireCommandsTest, throwingAnythingInvokeReturnsFailure) {
     boost::shared_ptr<const WireResponse> response(invokeCommand.run(engine));
     EXPECT_PTRTYPE(FailureResponse, response.get());
     EXPECT_EQ (static_cast<const FailureResponse&>(*response).getMessage(), "");
+    EXPECT_EQ (static_cast<const FailureResponse&>(*response).getExceptionType(), "");
+    EXPECT_THAT(static_cast<const FailureResponse&>(*response).getEmbeddings(), IsEmpty());
 }
 
 
