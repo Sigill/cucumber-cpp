@@ -44,7 +44,9 @@ void CukeEngineImpl::beginScenario(const tags_type & tags) {
     cukeCommands.beginScenario(tags);
 }
 
-InvokeResult CukeEngineImpl::invokeStep(const std::string & id, const invoke_args_type & args, const invoke_table_type & tableArg) {
+InvokeResult CukeEngineImpl::invokeStep(const std::string& id,
+                                        const invoke_args_type& args,
+                                        const invoke_table_type& tableArg) {
     typedef invoke_table_type::index table_index;
 
     InvokeArgs commandArgs;
