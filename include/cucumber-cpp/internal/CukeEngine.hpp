@@ -71,7 +71,9 @@ public:
      * @throws InvokeException if something unexpected happen during the execution of the step
      * (failing or pending steps are expected, they will not trigger an exception).
      */
-    virtual InvokeResult invokeStep(const std::string & id, const invoke_args_type & args, const invoke_table_type & tableArg) = 0;
+    virtual InvokeResult invokeStep(const std::string & id,
+                                    const invoke_args_type & args,
+                                    const invoke_table_type & tableArg) = 0;
 
     /**
      * Ends a scenario.
